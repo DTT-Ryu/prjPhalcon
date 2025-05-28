@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Phalcon\Mvc\Dispatcher;
 use Phalcon\Html\Escaper;
 use Phalcon\Flash\Direct as Flash;
 use Phalcon\Mvc\Model\Metadata\Memory as MetaDataAdapter;
@@ -10,7 +11,7 @@ use Phalcon\Mvc\View\Engine\Volt as VoltEngine;
 use Phalcon\Session\Adapter\Stream as SessionAdapter;
 use Phalcon\Session\Manager as SessionManager;
 use Phalcon\Mvc\Url as UrlResolver;
-
+use Phalcon\Events\Manager as EventsManager;
 /**
  * Shared configuration service
  */
@@ -119,4 +120,107 @@ $di->setShared('session', function () {
     $session->start();
 
     return $session;
+});
+
+$di->setShared('eventsManager', function () {
+    return new \Phalcon\Events\Manager();
+});
+
+
+//acl
+$di->set('acl', function(){
+    return Acl::getAcl();
+});
+
+
+//middleware check quyền
+
+$di->setShared('dispatcher', function () use ($di) {
+    $eventsManager = new EventsManager();
+
+    $eventsManager->attach('dispatch:beforeExecuteRoute', function ($event, $dispatcher) use ($di) {
+        $role = $di->get('session')->get('role');
+        $controller = $dispatcher->getControllerName();
+        $action = $dispatcher->getActionName();
+
+        // Kiểm tra nếu chưa đăng nhập
+        if (!$role) {
+            if ($controller === 'index' && in_array($action, ['index', 'login'])) {
+                return true;
+            }
+
+            $dispatcher->forward([
+                'controller' => 'index',
+                'action'     => 'index',
+            ]);
+            return false;
+        }
+
+        // Kiểm tra quyền truy cập
+        if (!$di->get('acl')->isAllowed($role, $controller, $action)) {
+            // echo "Access Denied for role: $role, controller: $controller, action: $action";
+            // return false;
+             $di->get('session')->destroy();
+              return $di->get('response')->redirect('/prjPhalcon', true);
+        }
+    });
+
+    $dispatcher = new Dispatcher();
+    $dispatcher->setEventsManager($eventsManager);
+    return $dispatcher;
+});
+
+
+// //middleware check quyền
+// $di->setShared('dispatcher', function() use ($di) {
+//     $eventManager = $di->getShared('eventsManager');
+//     $dispatcher = new \Phalcon\Mvc\Dispatcher();
+
+//  $eventManager->attach('dispatch:beforeExecuteRoute', function($event, $dispatcher) use ($di) {
+//     $session = $di->getShared('session');
+//     $role = $session->get('role');
+//     $controller = strtolower($dispatcher->getControllerName());
+//     $action = strtolower($dispatcher->getActionName());
+
+//     // Chưa đăng nhập
+//     if (!$role) {
+//         if ($controller === 'index' && in_array($action, ['index', 'login'])) {
+//             return true;
+//         }
+//         $dispatcher->forward([
+//             'controller' => 'index',
+//             'action' => 'login'
+//         ]);
+//         return false;
+//     }
+
+//     // Đăng nhập rồi, nhưng không có quyền
+//     $acl = $di->get('acl');
+//     if (!$acl->isAllowed($role, $controller, $action)) {
+//         // Chặn hẳn, không cho chạy tiếp controller
+//         $dispatcher->forward([
+//             'controller' => 'index',
+//             'action' => 'index'
+//         ]);
+//         return false;
+//     }
+// });
+
+//     $dispatcher->setEventsManager($eventManager);
+//     return $dispatcher;
+// });
+
+
+//flashsession
+$di->setShared('flashSession', function () {
+    $escaper = new Escaper(); 
+    $session = $this->getShared('session');
+    $flash = new \Phalcon\Flash\Session($escaper, $session);  // Truyền session vào
+    $flash->setCssClasses([
+        'error'   => 'alert alert-danger',
+        'success' => 'alert alert-success',
+        'notice'  => 'alert alert-info',
+        'warning' => 'alert alert-warning'
+    ]);
+    return $flash;
 });
